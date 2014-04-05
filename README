@@ -1,4 +1,13 @@
 This is the foldre where I'll try to keep all my python script organized.
 I'll also try to keep in this readme a list of the script and their use.
 
+Reweight.py 
+	This script is used to reweight the probability of a structure by caclulting the difference 
+	in solvation free energy between the model used and SEA 
+
+FF_devel.py
+	This script is used to develp a FF using solvation free energy as target. It uses SEA to 
+	caclualte the solvation free energy of a series of model inside a given range of parameter 
+	(in 1st implementation it scans a range of +- 10% sigma and +- 10% charge)
+
 
