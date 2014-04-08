@@ -58,9 +58,11 @@ def get_q(A):
     return info, q
 
 def write_tops(Th, Tc, Tt, ATinfo, Ainfo, s, e, q, srange, qrange, top_name, npoints):
+    top_list=[]
     for iq, dq in enumerate(qrange):  #Loop over charges
      for js, ds in enumerate(srange): #Loop over sigmas 
        filename = top_num.format(top_name, iq, js)
+       top_list.append(filename)      #We create a list of the topfile so later we are more flexible 
        with open(filename,'w') as outfile:
          for line in Th: 
              print >>outfile, line[:-1] 
@@ -77,12 +79,10 @@ def write_tops(Th, Tc, Tt, ATinfo, Ainfo, s, e, q, srange, qrange, top_name, npo
          for line in Tt:
              print >>outfile, line[:-1]
          print >>outfile, "\n"
-     p=sp.Popen('ls '+top_name+'*.top',shell=True, stdout=sp.PIPE)
-     (output, err) =  p.communicate()
-    return output.split()
+    return top_list
 
 def create_gro(name, group_out):
-    p=sp.Popen('trjconv -f traj.trr -o '+name+'.gro -s topol.tpr -sep -e 100', shell=True, stdin=sp.PIPE)
+    p=sp.Popen('trjconv -f traj.trr -o '+name+'.gro -s topol.tpr -sep -e 200', shell=True, stdin=sp.PIPE)
     p.stdin.write(group_out+' \n')
     p.communicate()[0]
     p.stdin.close()
@@ -102,7 +102,7 @@ def Eone(gro_files, top_file):
 	     line=line.split()
 	     Etot=float(line[1])
 	     E.append(Etot)
-    return E
+    return np.array(E)
 
 def Eall(gro_files, top_files):
     E=[]
@@ -119,6 +119,24 @@ def DG0(E, nbin):
     DG=np.sum(((bins+0.5*dE)*P)*dE)
     return DG    
 
+def DDG(Ea,E0,kBT):
+    ddg=[]
+    for E in Ea:
+        P, bins = np.histogram((E-E0))
+        de=bins[1]-bins[0]
+	e=-kBT*np.log(np.sum(de*P*np.exp(-(bins[:-1]+0.5*de)/kBT)))
+	ddg.append(e)
+    return ddg
+
+def pint_res(dg_all,qrange,srange, dgt):
+    DG=dg_all.reshape(len(qrange),len(srange)) # { {DG_s0, DG_s1, ... }@q0 , {DG_s0, DG_s1, ... }@q1 , ... }
+    with open("results",'w') as out:
+      print >>out, "#q_scale  s_scale  DG*   DG*-target"
+      for q, el in zip(qrange, DG):
+          for s, dg in zip(srange, el):
+	      print >>out ,'{:4.2f} {:4.2f} {:9.6f} {:9.6f}'.format( q, s, dg, dg-dgt)   
+
+
 def main():
     #Variables: 
     qrange=[-0.1,0.1]
@@ -128,6 +146,8 @@ def main():
     new_top_name="TOP"
     new_gro_name="struct"
     nbin=50
+    kBT=300*1.9872041E-3 #in kcal/mol
+    dg_targhet=-4.756 #kcal
 
   
     #Script:
@@ -140,8 +160,13 @@ def main():
     top_files=write_tops(Th, Tc, Tt, ATinfo, Ainfo, sigma, epsilon, q, srange, qrange, new_top_name, npoints)
     E0=Eone(gro_files, top_files[int(len(top_files)/2)]) #We pass all the config file and only the middle top (original FF)
     Ea=Eall(gro_files, top_files) 
-    #print Ea
     dg0=DG0(E0,nbin)
+    ddg_all= DDG(Ea,E0,kBT)
+    dg_all=ddg_all+dg0
+    pint_res(dg_all, qrange, srange, dg_targhet)
+    #print dg_all
+
+
     #print dg0
 
 if __name__ == '__main__': #Weird Python way to execute main()
