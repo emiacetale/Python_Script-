@@ -86,7 +86,7 @@ def write_tops(Th, Tc, Tt, ATinfo, Ainfo, s, e, q, srange, qrange, top_name, npo
     return top_list
 
 def create_gro(name, group_out):
-    p=sp.Popen('trjconv -f traj.trr -o '+name+'.gro -s topol.tpr -sep -e 200', shell=True, stdin=sp.PIPE)
+    p=sp.Popen('trjconv -f traj.trr -o '+name+'.gro -s topol.tpr -sep -e 200 2>/dev/null', shell=True, stdin=sp.PIPE)
     p.stdin.write(group_out+' \n')
     p.communicate()[0]
     p.stdin.close()
@@ -176,7 +176,7 @@ def plot_res(dg, qrange, srange):
 
 def parse_args():                              #in line argument parser with help 
     parser = argparse.ArgumentParser()
-    parser.add_argument('np', help='number of points')
+    parser.add_argument('np', help='number of points (21)')
     parser.add_argument('dgt', help='target solvation free energy')
     return parser.parse_args()
 
@@ -195,6 +195,9 @@ def main():
     args = parse_args()             #We read some input 
     npoints=int(args.np)            #   and we process
     dg_target=float(args.dgt)       #   them
+    if npoints % 2 ==0 : 
+       print "!!The number of point must be odd!!"
+       exit()
     qrange=np.linspace(qrange[0],qrange[1],num=npoints)
     srange=np.linspace(srange[0],srange[1],num=npoints)
     Th, Tc, Tt, At, A=read_top("topol.top")         #Read and decompose the 
