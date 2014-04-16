@@ -2,12 +2,20 @@ This is the foldre where I'll try to keep all my python script organized.
 I'll also try to keep in this readme a list of the script and their use.
 
 Reweight.py 
-	This script is used to reweight the probability of a structure by caclulting the difference 
-	in solvation free energy between the model used and SEA 
+	This script is used to reweight the probability of a structure by 
+    caclulting the difference in solvation free energy between the model 
+    used and SEA. It is a TEST implementation that works reweighting 
+    probability of a Rhamachandran plot. 
 
 FF_devel.py
-	This script is used to develp a FF using solvation free energy as target. It uses SEA to 
-	caclualte the solvation free energy of a series of model inside a given range of parameter 
-	(in 1st implementation it scans a range of +- 10% sigma and +- 10% charge)
+	This script is used to develp a FF using solvation free energy as 
+    target. It uses SEA to caclualte the solvation free energy of a series 
+    of model inside a given range of parameter (in 1st implementation it scans 
+    a range of +- 10% sigma and +- 10% charge)
+
+Reweight_cluster.py 
+    This script reads a trajectory containing all the frames belonging to a 
+    stucture cluster (RMSD) and gives out a reweighted size of the cluster
+    [At the moment it is reweighted brutally simply by e^(-(E_SEA-E_GB)/kT)]
 
 
