@@ -37,15 +37,11 @@ def write_amber_frame(coords, outfile, comment):
     n_atoms = coords.shape[0]
     print >>outfile, comment
     print >>outfile, '{:d}'.format(n_atoms)
-    #print coords
     for xyz0, xyz1 in zip(coords[0::2], coords[1::2]):
         x0, y0, z0 = xyz0*10
         x1, y1, z1 = xyz1*10
 	line=crd_format_string.format(x0, y0, z0, x1, y1, z1)
         print >>outfile, line
-    #for xyz in coords:
-    #    print xyz
-    #line = crd_format_string.format()
 
 def energy_GB(filename_a):
     sp.call(["cp",filename_a,"amber.crd"])
@@ -54,28 +50,23 @@ def energy_GB(filename_a):
         if 'EGB' in line:
 	    cols = line.split()
 	    ans = float(cols[5])
-
-    #p=sp.Popen("grep 'EGB' mdinfo | awk '{print $6}'",stdout=sp.PIPE, shell=True) #I guess there is a Python way to pick a line from a file
-    #(output, err) =  p.communicate()
     return ans  
 
 def energy_SEA(filename_g):
     sp.call(["cp",filename_g,"gromacs.gro"])
-    p=sp.Popen("/home/ebrini/software/SEA/bin/solvate -s gromacs -d 12 -i 500", shell=True, stdout=sp.PIPE)
+    p=sp.Popen("/home/ebrini/software/SEA_LIBO/bin/solvate -s gromacs -ce none 2>/dev/null", shell=True, stdout=sp.PIPE)
+    p.communicate()
+    p=sp.Popen("/home/ebrini/software/FSEA/FSEA_adp_big_mol.exe < surface.povdat", shell=True, stdout=sp.PIPE)
     (output, err) =  p.communicate()
     #print output
-    for line in output.split('\n'):
-        if "Non-Polar" in line: 
-	    line=line.split()
-	    Enp=float(line[1])
-	if "Total" in line:
-	    line=line.split()
-	    Etot=float(line[1])
-    #print Enp, Etot
-    return (Etot-Enp)
+    Ep=float(output)
+    p=sp.Popen("rm surface.povdat", shell=True)
+    p.communicate()
+    return (Ep/4.184) #Our UOM is kcal wile Libo's FSEA is in KJ
 
 def frame_op(trj, atom_info, basename, resfile):   #iterator over the frames 
     for i, frame in enumerate(trj):       #counter i and frame are now synced
+        print "Frame", i 
 	#We compute Rham Plot value 
 	f=md.compute_phi(frame)
 	p=md.compute_psi(frame)
@@ -97,9 +88,9 @@ def frame_op(trj, atom_info, basename, resfile):   #iterator over the frames
 	#We compute the SEA and GB Energy
 	Egb   = energy_GB(filename_a)
 	Esea  = energy_SEA(filename_g)
-        
+
 	#And we write the output in a file 
-	line='{:8.3f} {:8.3f} {:8.3f} {:8.3f} {:8.3f}'.format(F, P, Esea, Egb, np.exp(-(Esea-Egb)/0.59616123))
+	line='{:8.3f} {:8.3f} {:8.3f} {:8.3f} {:11.6f}'.format(F, P, Esea, Egb, np.exp(-(Esea-Egb)/0.59616123))
 	print >>resfile, line
 
 def parse_args():                              #in line argument parser with help 
