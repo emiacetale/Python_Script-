@@ -81,8 +81,8 @@ def frame_op(trj, atom_info, basename, resfile):   #iterator over the frames
 	    write_gro_frame(frame.xyz[0, ...], atom_info, f, info)
 	
 	#We also create the Amber coord file 
-        filename_a = '{}_{:04d}.inpcrd'.format(basename, i)
-	with open(filename_a,'w') as f:
+    filename_a = '{}_{:04d}.inpcrd'.format(basename, i)
+    with open(filename_a,'w') as f:
 	    write_amber_frame(frame.xyz[0, ...], f, info)
 	
 	#We compute the SEA and GB Energy
