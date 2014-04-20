@@ -7,6 +7,14 @@ import os
 import subprocess as sp
 import numpy as np
 
+from simtk.openmm.app import AmberPrmtopFile, OBC2, GBn, GBn2, Simulation, PDBFile, StateDataReporter
+from simtk.openmm.app import forcefield as ff
+from simtk.openmm import LangevinIntegrator, Platform
+from simtk.unit import kelvin, picosecond, femtosecond, angstrom, nanometer, kilojoule_per_mole
+from simtk.unit import Quantity, kilojoule, mole, gram
+
+kT= 300*1.9872041E-3  #In kcal/mol
+
 AtomInfo = namedtuple('AtomInfo', 'res_num res_name atom_num atom_name') #Create a named touple 
 gro_format_string = '{:5d}{:5s}{:5s}{:5d}{:8.3f}{:8.3f}{:8.3f}'          #Define Format
 crd_format_string = '{:12.7f}{:12.7f}{:12.7f}{:12.7f}{:12.7f}{:12.7f}'
@@ -33,24 +41,14 @@ def write_gro_frame(coords, atom_info, outfile, comment):
 	print >>outfile, line
     print >>outfile, ' 10.000   10.000   10.000' #Fake box size
 
-def write_amber_frame(coords, outfile, comment):
-    n_atoms = coords.shape[0]
-    print >>outfile, comment
-    print >>outfile, '{:d}'.format(n_atoms)
-    for xyz0, xyz1 in zip(coords[0::2], coords[1::2]):
-        x0, y0, z0 = xyz0*10
-        x1, y1, z1 = xyz1*10
-	line=crd_format_string.format(x0, y0, z0, x1, y1, z1)
-        print >>outfile, line
-
-def energy_GB(filename_a):
-    sp.call(["cp",filename_a,"amber.crd"])
-    sp.call("pmemd -i amber.in -o mdout -p amber.prmtop -c amber.crd -O", shell=True)
-    for line in open('mdinfo'):
-        if 'EGB' in line:
-	    cols = line.split()
-	    ans = float(cols[5])
-    return ans  
+def energy_GB(frame, simV, simGB):
+    simV.context.setPositions(frame.xyz[0, ...])
+    simGB.context.setPositions(frame.xyz[0, ...])
+    stateV = simV.context.getState(getEnergy=True)
+    stateGB=simGB.context.getState(getEnergy=True)
+    E_V = stateV.getPotentialEnergy()/kilojoule_per_mole
+    E_GB=stateGB.getPotentialEnergy()/kilojoule_per_mole 
+    return ((E_GB-E_V)*0.239005736)
 
 def energy_SEA(filename_g):
     sp.call(["cp",filename_g,"gromacs.gro"])
@@ -73,55 +71,63 @@ def make_files(trj, atom_info, basename):
         gro_f.append(filename_g)
         with open(filename_g, 'w') as f:
              write_gro_frame(frame.xyz[0, ...], atom_info, f, info)
-        filename_a = '{}_{:06d}.inpcrd'.format(basename, i)
-        crd_f.append(filename_a)
-        with open(filename_a,'w') as f:
-            write_amber_frame(frame.xyz[0, ...], f, info)
-    return gro_f, crd_f
+    return gro_f
 
-#def frame_op(trj, atom_info, basename, resfile):   #iterator over the frames 
-#    for i, frame in enumerate(trj):       #counter i and frame are now synced
-#        print "Frame", i 
-#	    #We compute Rham Plot value 
-#        f=md.compute_phi(frame)
-#        p=md.compute_psi(frame)
-#            F=float(f[1][0][0])
-#        P=float(p[1][0][0])
-#        #We create the gromacs coord file 
-#        filename_g = '{}_{:04d}.gro'.format(basename, i)
-#        #filename="gromacs.gro"
-#        info=' phi={:8.3f} psi={:8.3f}'.format(F, P)
-#        #info='test'
-#        with open(filename_g, 'w') as f:
-#            write_gro_frame(frame.xyz[0, ...], atom_info, f, info)
-#        
-#        #We also create the Amber coord file 
-#        filename_a = '{}_{:04d}.inpcrd'.format(basename, i)
-#        with open(filename_a,'w') as f:
-#            write_amber_frame(frame.xyz[0, ...], f, info)
-#        
-#        #We compute the SEA and GB Energy
-#        Egb   = energy_GB(filename_a)
-#        Esea  = energy_SEA(filename_g)
-#    
-#        #And we write the output in a file 
-#        line='{:8.3f} {:8.3f} {:8.3f} {:8.3f} {:11.6f}'.format(F, P, Esea, Egb, np.exp(-(Esea-Egb)/0.59616123))
-#        print >>resfile, line
+def omm_sys(top, pdb):
+    prmtop = AmberPrmtopFile(top)
+    pdb = PDBFile(pdb)
+    systemOBC = prmtop.createSystem(nonbondedMethod=ff.CutoffNonPeriodic,
+        nonbondedCutoff=100.*nanometer, constraints=ff.HBonds, implicitSolvent=OBC2)
+    systemVAC=system = prmtop.createSystem(nonbondedMethod=ff.CutoffNonPeriodic,
+               nonbondedCutoff=100.*nanometer, constraints=ff.HBonds, implicitSolvent=None)
+    integratorGB = LangevinIntegrator(300*kelvin, 1/picosecond,0.002*picosecond)
+    integratorV = LangevinIntegrator(300*kelvin, 1/picosecond,0.002*picosecond)
+    simGB = Simulation(prmtop.topology, systemOBC, integratorGB)
+    simV  = Simulation(prmtop.topology, systemVAC, integratorV)
+    simGB.context.setPositions(pdb.positions)
+    simV.context.setPositions(pdb.positions)
+    return simV, simGB
+
+def frame_op(simV, simGB, trj, gro_f):
+    #print dir(stateV)
+    E=[]
+    for gf, frame in zip(gro_f,trj):
+        E_SEA=energy_SEA(gf)
+        E_GB=energy_GB(frame, simV, simGB)
+        E.append([E_SEA,E_GB])
+    return E
+
+def weight(E):
+    E=np.array(E)
+    de=np.diff(E,axis=1) #Array of Egb-Esea == -(Esea-Egb)
+    de=de/kT               
+    de=np.exp(de)        #Array of e^(-dE/kT) == weights
+    w=np.sum(de)         #Sum of the weights == cluster weight
+    return (w)
 
 def parse_args():                              #in line argument parser with help 
     parser = argparse.ArgumentParser()
     parser.add_argument('trj_filename', help='trajectory file')
     parser.add_argument('pdb_filename', help='pdb file')
+    parser.add_argument('amber_top', help='amber topology')
     return parser.parse_args()
 
 def main():
-    args = parse_args()
-    basename='struct_temp'
-    trj=md.load_mdcrd(args.trj_filename, top=args.pdb_filename)
-    atom_info = get_atom_info(trj)
-    gro_f, crd_f = make_files(trj, atom_info, basename)
+    #Variables that don't require user input 
+    basename='struct_temp' 
+    resname='Weights'
+    #Actual script 
+    args = parse_args()                                         #Get inline input
+    trj=md.load_mdcrd(args.trj_filename, top=args.pdb_filename) #load traj
+    atom_info = get_atom_info(trj)                              #get info of the atoms 
+    gro_f = make_files(trj[:10], atom_info, basename)           #Make gro file from the traj 
+    simV , simGB=omm_sys(args.amber_top, args.pdb_filename)     #makes openMM systems 
+    E=frame_op(simV, simGB, trj, gro_f)
+    W=weight(E)
+    print W
 
-
+     
+    #simV.step(1)
 
 if __name__ == '__main__': #Weird Python way to execute main()
     main()
