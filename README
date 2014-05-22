@@ -18,4 +18,8 @@ Reweight_cluster.py
     stucture cluster (RMSD) and gives out a reweighted size of the cluster
     [At the moment it is reweighted brutally simply by e^(-(E_SEA-E_GB)/kT)]
 
+Reweight_amap.py
+    This script reads a trajectory and create a metatrajectory based on frame
+    probability caluated using original and modified amap. 
+
 
