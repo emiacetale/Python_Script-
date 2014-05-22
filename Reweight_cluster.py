@@ -92,13 +92,15 @@ def frame_op(simV, simGB, trj, gro_f):
     #print dir(stateV)
     E=[]
     for gf, frame in zip(gro_f,trj):
+        #print gf 
         E_SEA=energy_SEA(gf)
         E_GB=energy_GB(frame, simV, simGB)
         E.append([E_SEA,E_GB])
     return E
 
-def weight(E):
+def weight(E,nr):
     E=np.array(E)
+    E=E/nr               #We divide by the number of AA 
     de=np.diff(E,axis=1) #Array of Egb-Esea == -(Esea-Egb)
     de=de/kT               
     de=np.exp(de)        #Array of e^(-dE/kT) == weights
@@ -110,7 +112,18 @@ def parse_args():                              #in line argument parser with hel
     parser.add_argument('trj_filename', help='trajectory file')
     parser.add_argument('pdb_filename', help='pdb file')
     parser.add_argument('amber_top', help='amber topology')
+    parser.add_argument('first_frame',  help='1st frame to process', type=int)
+    parser.add_argument('last_frame',  help='last frame to process', type=int)
     return parser.parse_args()
+
+def cut_trj(trj, first, last):
+    if len(trj)<first:
+        #print "Not enough frame in the trajectory! (first frame to analyze is > than the last trj frame"
+        exit()
+    if len(trj)<last:
+        last=len(trj)
+    return(trj[first:last])
+
 
 def main():
     #Variables that don't require user input 
@@ -119,14 +132,14 @@ def main():
     #Actual script 
     args = parse_args()                                         #Get inline input
     trj=md.load_mdcrd(args.trj_filename, top=args.pdb_filename) #load traj
+    trj = cut_trj(trj, args.first_frame, args.last_frame)
     atom_info = get_atom_info(trj)                              #get info of the atoms 
-    gro_f = make_files(trj[:10], atom_info, basename)           #Make gro file from the traj 
-    simV , simGB=omm_sys(args.amber_top, args.pdb_filename)     #makes openMM systems 
+    gro_f = make_files(trj, atom_info, basename)                #Make gro file from the traj 
+    simV , simGB=omm_sys(args.amber_top, args.pdb_filename)     #makes openMM systems
     E=frame_op(simV, simGB, trj, gro_f)
-    W=weight(E)
+    #print "E Stored"
+    W=weight(E,trj.topology.n_residues)
     print W
-
-     
     #simV.step(1)
 
 if __name__ == '__main__': #Weird Python way to execute main()
