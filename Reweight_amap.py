@@ -1,4 +1,14 @@
 #!/usr/bin/env python
+ 
+from simtk.openmm.app import AmberPrmtopFile, OBC2, GBn, GBn2, Simulation,PDBFile, StateDataReporter, PDBReporter
+from simtk.openmm.app import forcefield as ff
+from simtk.openmm import LangevinIntegrator, MeldForce, Platform, RdcForce, CustomExternalForce
+from simtk.unit import kelvin, picosecond, femtosecond, angstrom, nanometer
+from simtk.unit import Quantity, kilojoule, mole, gram
+from meld.system.restraints import SelectableRestraint, NonSelectableRestraint, DistanceRestraint, TorsionRestraint
+from meld.system.openmm_runner import cmap
+from meld.system.restraints import ConfinementRestraint, DistProfileRestraint, TorsProfileRestraint, CartesianRestraint
+from meld.system.restraints import RdcRestraint
 
 import mdtraj as md
 import argparse
@@ -6,6 +16,7 @@ from collections import namedtuple
 import os 
 import subprocess as sp
 import numpy as np
+import matplotlib.pyplot as plt
 
 from simtk.openmm.app import AmberPrmtopFile, OBC2, GBn, GBn2, Simulation, PDBFile, StateDataReporter
 from simtk.openmm.app import forcefield as ff
@@ -14,32 +25,6 @@ from simtk.unit import kelvin, picosecond, femtosecond, angstrom, nanometer, kil
 from simtk.unit import Quantity, kilojoule, mole, gram
 
 kT= 300*1.9872041E-3  #In kcal/mol
-
-AtomInfo = namedtuple('AtomInfo', 'res_num res_name atom_num atom_name') #Create a named touple 
-gro_format_string = '{:5d}{:5s}{:5s}{:5d}{:8.3f}{:8.3f}{:8.3f}'          #Define Format
-crd_format_string = '{:12.7f}{:12.7f}{:12.7f}{:12.7f}{:12.7f}{:12.7f}'
-
-def get_atom_info(trj):                  #Estract the info we need (A & Res name, and A & R index)                          
-    atoms = []
-    for atom in trj.topology.atoms:
-        #print dir(atom)                 #Show the attributes of atom
-        res_num = atom.residue.resSeq
-        res_name = atom.residue.name
-        atom_num = atom.index
-        atom_name = atom.name
-        atoms.append(AtomInfo(res_num, res_name, atom_num, atom_name))
-    return atoms
-
-def write_gro_frame(coords, atom_info, outfile, comment):
-    n_atoms = coords.shape[0]
-    assert n_atoms == len(atom_info)
-    print >>outfile, comment
-    print >>outfile, '{:d}'.format(n_atoms)
-    for xyz, atom in zip(coords, atom_info):    #2 syncronized iterator for 2 lists
-        x, y, z = xyz
-	line = gro_format_string.format(atom.res_num, atom.res_name, atom.atom_name, atom.atom_num+1, x, y, z)
-	print >>outfile, line
-    print >>outfile, ' 10.000   10.000   10.000' #Fake box size
 
 def energy_GB(frame, simV, simGB):
     simV.context.setPositions(frame.xyz[0, ...])
@@ -50,97 +35,109 @@ def energy_GB(frame, simV, simGB):
     E_GB=stateGB.getPotentialEnergy()/kilojoule_per_mole 
     return ((E_GB-E_V)*0.239005736)
 
-def energy_SEA(filename_g):
-    sp.call(["cp",filename_g,"gromacs.gro"])
-    p=sp.Popen("/home/ebrini/software/SEA_LIBO/bin/solvate -s gromacs -ce none 2>/dev/null", shell=True, stdout=sp.PIPE)
-    p.communicate()
-    p=sp.Popen("/home/ebrini/software/FSEA/FSEA_adp_big_mol.exe < surface.povdat", shell=True, stdout=sp.PIPE)
-    (output, err) =  p.communicate()
-    #print output
-    Ep=float(output)
-    p=sp.Popen("rm surface.povdat", shell=True)
-    p.communicate()
-    return (Ep/4.184) #Our UOM is kcal wile Libo's FSEA is in KJ
+def omm_sys(topf, a_s, b_s):
+    #Read Amber 
+    prmtop = AmberPrmtopFile(topf)
+    with open(topf) as top_file:
+         top = top_file.read()   #Weird thing needed for amap
+    #Create 2 systems
+    system0 = prmtop.createSystem(nonbondedMethod=ff.CutoffNonPeriodic,
+               nonbondedCutoff=100.*nanometer, constraints=ff.AllBonds, implicitSolvent=OBC2)
+    system1 = prmtop.createSystem(nonbondedMethod=ff.CutoffNonPeriodic,
+               nonbondedCutoff=100.*nanometer, constraints=ff.AllBonds, implicitSolvent=OBC2)
+    #Create 2 integrators
+    integrator0 = LangevinIntegrator(300*kelvin, 1/picosecond,0.002*picosecond)
+    integrator1 = LangevinIntegrator(300*kelvin, 1/picosecond,0.002*picosecond)
+    #Add amap to the systems 
+    adder = cmap.CMAPAdder(top,1,1)
+    adder.add_to_openmm(system0)
+    adder = cmap.CMAPAdder(top,a_s,b_s)
+    adder.add_to_openmm(system1)
+    #Creates the 2 simulations  
+    sim0 = Simulation(prmtop.topology, system0, integrator0)
+    sim1 = Simulation(prmtop.topology, system1, integrator1)
+    return sim0, sim1
 
-def make_files(trj, atom_info, basename):
-    info=' File created with a script by EMI' 
-    gro_f=[]
-    crd_f=[]
-    for i, frame in enumerate(trj):
-        filename_g = '{}_{:06d}.gro'.format(basename, i)
-        gro_f.append(filename_g)
-        with open(filename_g, 'w') as f:
-             write_gro_frame(frame.xyz[0, ...], atom_info, f, info)
-    return gro_f
+def frame_op(sim0, sim1, trj):
+    E0=[]
+    E1=[]
+    for frame in trj:
+        E0.append(Eframe(sim0,frame))
+        E1.append(Eframe(sim1,frame))
+    #print E0
+    #print E1
+    E0=np.array(E0)
+    E1=np.array(E1)
+    P=-(E1-E0)/kT
+    P=np.exp(P)
+    W=np.sum(P)
+    return P/W
 
-def omm_sys(top, pdb):
-    prmtop = AmberPrmtopFile(top)
-    pdb = PDBFile(pdb)
-    systemOBC = prmtop.createSystem(nonbondedMethod=ff.CutoffNonPeriodic,
-        nonbondedCutoff=100.*nanometer, constraints=ff.HBonds, implicitSolvent=OBC2)
-    systemVAC=system = prmtop.createSystem(nonbondedMethod=ff.CutoffNonPeriodic,
-               nonbondedCutoff=100.*nanometer, constraints=ff.HBonds, implicitSolvent=None)
-    integratorGB = LangevinIntegrator(300*kelvin, 1/picosecond,0.002*picosecond)
-    integratorV = LangevinIntegrator(300*kelvin, 1/picosecond,0.002*picosecond)
-    simGB = Simulation(prmtop.topology, systemOBC, integratorGB)
-    simV  = Simulation(prmtop.topology, systemVAC, integratorV)
-    simGB.context.setPositions(pdb.positions)
-    simV.context.setPositions(pdb.positions)
-    return simV, simGB
+def metatrj(trj, P, name_out):
+    i=0  
+    frames_used=[]
+    with md.formats.PDBTrajectoryFile(name_out,mode='w') as out:
+        while i<len(trj): #We need i since mdtraj cand perform a len() of a trj that is being created
+            #print i
+            frame=np.random.randint(low=0,high=len(trj))
+            if P[frame]>np.random.random():
+               out.write(trj[frame].xyz[0, ...],trj.topology)
+               frames_used.append(frame)
+               i=i+1
+    out.close()     
+    return frames_used
 
-def frame_op(simV, simGB, trj, gro_f):
-    #print dir(stateV)
-    E=[]
-    for gf, frame in zip(gro_f,trj):
-        #print gf 
-        E_SEA=energy_SEA(gf)
-        E_GB=energy_GB(frame, simV, simGB)
-        E.append([E_SEA,E_GB])
-    return E
+def Eframe(sim,frame):
+    sim.context.setPositions(frame.xyz[0, ...])
+    state = sim.context.getState(getEnergy=True)
+    return ((state.getPotentialEnergy()/kilojoule_per_mole)*0.239005736)
 
-def weight(E,nr):
-    E=np.array(E)
-    E=E/nr               #We divide by the number of AA 
-    de=np.diff(E,axis=1) #Array of Egb-Esea == -(Esea-Egb)
-    de=de/kT               
-    de=np.exp(de)        #Array of e^(-dE/kT) == weights
-    w=np.sum(de)         #Sum of the weights == cluster weight
-    return (w)
+def make_info(frame_list,P):
+    #Per Frame Probability 
+    fig_PF=plt.figure()
+    ax1 = fig_PF.add_axes([0.25, 0.15, 0.65, 0.8])
+    ax1.tick_params(axis='both', which='major', labelsize=20)
+    ax1.set_xlabel(r'$ frame $',fontsize=25)
+    ax1.set_ylabel(r'$ P(frame) $',fontsize=25)
+    p1,=ax1.plot(np.arange(0,len(P),1),P, color='blue', linewidth=2, linestyle="-")
+    fig_PF.savefig('Prob_per_frame.pdf')
+    #Aboundancy of original traj frame in the meta-trj
+    fig_FA=plt.figure()
+    P_R, eR=np.histogram(frame_list,bins=len(P),normed=False)
+    ax1 = fig_FA.add_axes([0.25, 0.15, 0.65, 0.8])
+    ax1.tick_params(axis='both', which='major', labelsize=20)
+    ax1.set_xlabel('frame',fontsize=20)
+    ax1.set_ylabel('N of times frame appear in meta traj',fontsize=20)
+    p1,=ax1.plot(np.arange(0,len(P),1),P_R, color='blue', linewidth=2, linestyle="-")
+    fig_FA.savefig('Abound_F0_in_metatraj.pdf') 
 
 def parse_args():                              #in line argument parser with help 
     parser = argparse.ArgumentParser()
-    parser.add_argument('trj_filename', help='trajectory file')
-    parser.add_argument('pdb_filename', help='pdb file')
+    parser.add_argument('trj_filename', help='PDB trajectory file')
+    #parser.add_argument('pdb_filename', help='pdb file')
     parser.add_argument('amber_top', help='amber topology')
-    parser.add_argument('first_frame',  help='1st frame to process', type=int)
-    parser.add_argument('last_frame',  help='last frame to process', type=int)
+    parser.add_argument('alph_scal', help='scaling of the alpha helix amap correction', type=float)
+    parser.add_argument('beta_scal', help='scaling of the beta sheet amap correction', type=float)
+    #parser.add_argument('first_frame',  help='1st frame to process', type=int)
+    #parser.add_argument('last_frame',  help='last frame to process', type=int)
     return parser.parse_args()
 
-def cut_trj(trj, first, last):
-    if len(trj)<first:
-        #print "Not enough frame in the trajectory! (first frame to analyze is > than the last trj frame"
-        exit()
-    if len(trj)<last:
-        last=len(trj)
-    return(trj[first:last])
-
-
 def main():
-    #Variables that don't require user input 
-    basename='struct_temp' 
-    resname='Weights'
-    #Actual script 
-    args = parse_args()                                         #Get inline input
-    trj=md.load_mdcrd(args.trj_filename, top=args.pdb_filename) #load traj
-    trj = cut_trj(trj, args.first_frame, args.last_frame)
-    atom_info = get_atom_info(trj)                              #get info of the atoms 
-    gro_f = make_files(trj, atom_info, basename)                #Make gro file from the traj 
-    simV , simGB=omm_sys(args.amber_top, args.pdb_filename)     #makes openMM systems
-    E=frame_op(simV, simGB, trj, gro_f)
-    #print "E Stored"
-    W=weight(E,trj.topology.n_residues)
-    print W
-    #simV.step(1)
+    args = parse_args()                                                #Get inline input
+    trj=md.load_pdb(args.trj_filename)                                 #load traj
+    print "trj loaded"
+    sim0, sim1=omm_sys(args.amber_top, args.alph_scal,args.beta_scal)  #Pepare sims wih amap
+    P=frame_op(sim0, sim1, trj)                                        #Calc frames' norm P 
+    print "Prob calculated"
+    frame_list=metatrj(trj, P, 'meta_traj.pdb')                        #Create the traj from prob
+    print "Trj created"
+    make_info(frame_list,P)                                            #Create files useful for 
+
+
+    ##print "E Stored"
+    #W=weight(E,trj.topology.n_residues)
+    #print W
+    ##simV.step(1)
 
 if __name__ == '__main__': #Weird Python way to execute main()
     main()
