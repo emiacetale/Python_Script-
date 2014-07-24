@@ -22,4 +22,7 @@ Reweight_amap.py
     This script reads a trajectory and create a metatrajectory based on frame
     probability caluated using original and modified amap. 
 
+Reweight_amap_iterative.py
+    This is a less memory expensive version of Reweight_amap.py 
+
 
