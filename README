@@ -10,4 +10,12 @@ FF_devel.py
 	caclualte the solvation free energy of a series of model inside a given range of parameter 
 	(in 1st implementation it scans a range of +- 10% sigma and +- 10% charge)
 
+PerAtomDG.py
+    It calulates the average per atom contribution to the solvation free energy of a molecule 
+    in a given traj (need to have a trj of only the molecule). It uses the old SEA
+
+CalcDipMom.py 
+    it outputs the average dipole moment of a molecule in a give trj. It is smart enough to read 
+    top file for the charges. 
+
 
