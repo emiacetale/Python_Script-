@@ -6,7 +6,8 @@ from simtk.openmm import LangevinIntegrator, MeldForce, Platform, RdcForce, Cust
 from simtk.unit import kelvin, picosecond, femtosecond, angstrom, nanometer
 from simtk.unit import Quantity, kilojoule, mole, gram
 from meld.system.restraints import SelectableRestraint, NonSelectableRestraint, DistanceRestraint, TorsionRestraint
-from meld.system.openmm_runner import cmap
+#from meld.system.openmm_runner import cmap   #import cmap from MELD 
+import cmap_mod as cmap                       #import cmap from local folder (no amap rescale for ala!)
 from meld.system.restraints import ConfinementRestraint, DistProfileRestraint, TorsProfileRestraint, CartesianRestraint
 from meld.system.restraints import RdcRestraint
 

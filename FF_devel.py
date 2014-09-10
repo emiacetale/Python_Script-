@@ -4,9 +4,11 @@
 import argparse
 import numpy as np
 import subprocess as sp
-import matplotlib as mpl
+import matplotlib as mpl    #To create graph directly in the queue 
+mpl.use('Agg')              #"   "     "     "        "  "   " 
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+import time 
 
 top_num ='{}_{:02d}_{:02d}.top'
 
@@ -16,19 +18,21 @@ def read_top(topology):
     #print TOP
     Top=[]
     for l in TOP:
-        if l[0]!=";" and l!="\n":
-    	   Top.append(l)
+        if l[0]!=";" and l!="\n" and l[0]!="#":
+            Top.append(l)
+    #print Top
     for i, line in enumerate(Top):
         if 'atomtypes' in line: 
-	    Atb=i+1
-	if 'pairtypes' in line: 
-	    Ate=i
+            Atb=i+1
+        if 'moleculetype' in line: 
+            Ate=i
         if 'atoms'     in line: 
-	    Ab=i+1
-	if 'bonds'     in line: 
-	    Ae=i
-	    break
+            Ab=i+1
+        if 'bonds'     in line: 
+            Ae=i
+            break
     #untouched pieces (head, center, tail) ot the topology 
+    #print Atb,Ate,Ab,Ae
     Th=Top[:Atb]
     Tc=Top[Ate:Ab]
     Tt=Top[Ae:-1] #We remove the presence of water from the topology 
@@ -45,10 +49,13 @@ def get_s_e(At):
     epsilon=[] 
     for line in At:
         line=line.split()
-	I='{:3s}  {:3d}   {:9.6f}  {:9.6f}  {:1s} '.format(line[0],int(line[1]),float(line[2]),float(line[3]),line[4])
-	info.append(I)
-	sigma.append(float(line[5]))
-	epsilon.append(float(line[6]))
+        #print line
+        I='{:3s}  {:3s}   {:9.6f}  {:9.6f}  {:1s} '.format(line[0],line[1],float(line[2]),float(line[3]),line[4])
+        info.append(I)
+        sigma.append(float(line[5]))
+        epsilon.append(float(line[6]))
+    #print sigma
+    #print epsilon
     return info, sigma, epsilon
 
 def get_q(A):
@@ -56,8 +63,8 @@ def get_q(A):
     q=[]
     for line in A:
         line=line.split()
-	q.append(float(line[6]))
-	I='  {:3d}    {:>3s}  {:3d}   {:>3s}   {:>3s}  {:2d}   '.format(int(line[0]),line[1],int(line[2]),line[3],line[4],int(line[5]))
+        q.append(float(line[6]))
+        I='  {:3d}    {:>3s}  {:3d}   {:>3s}   {:>3s}  {:2d}   '.format(int(line[0]),line[1],int(line[2]),line[3],line[4],int(line[5]))
         info.append([I,float(line[7])])
     return info, q
 
@@ -79,14 +86,14 @@ def write_tops(Th, Tc, Tt, ATinfo, Ainfo, s, e, q, srange, qrange, top_name, npo
              line='{:8.5f}   {:8.5f}'.format((Q+dq*Q),a_i[1])
              line=a_i[0]+line
              print >>outfile, line
-	 print >>outfile, "\n"
+             print >>outfile, "\n"
          for line in Tt:
              print >>outfile, line[:-1]
          print >>outfile, "\n"
     return top_list
 
-def create_gro(name, group_out):
-    p=sp.Popen('trjconv -f traj.trr -o '+name+'.gro -s topol.tpr -sep -e 200 2>/dev/null', shell=True, stdin=sp.PIPE)
+def create_gro(name, group_out, trj_name, tpr_name):
+    p=sp.Popen('trjconv -f '+trj_name+' -o '+name+'.gro -s '+tpr_name+' -sep -pbc mol 2>/dev/null', shell=True, stdin=sp.PIPE)
     p.stdin.write(group_out+' \n')
     p.communicate()[0]
     p.stdin.close()
@@ -94,18 +101,36 @@ def create_gro(name, group_out):
     (output, err) =  p.communicate()
     return output.split() 
 
+def energy_SEA(filename_g):
+    sp.call(["cp",filename_g,"gromacs.gro"])
+    #p=sp.Popen("/home/ebrini/software/SEA_LIBO/bin/solvate -s gromacs -ce none -d 12 -i 500 2>/dev/null", shell=True, stdout=sp.PIPE)
+    #p.communicate()
+    p=sp.Popen("/home/ebrini/software/SEA/bin/solvate -s gromacs -ce none -d 12 -i 500", shell=True, stdout=sp.PIPE)
+    (output, err) =  p.communicate()
+    output=output.split('\n')
+    for line in output:
+        #print line
+        #if 'Non-Polar' in line: 
+        if 'Total' in line: 
+            #print line
+            line=line.split()
+            Enp=float(line[1])
+    #print Enp
+    #p=sp.Popen("/home/ebrini/software/FSEA/FSEA_adp_big_mol.exe < surface.povdat", shell=True, stdout=sp.PIPE)
+    #(output, err) =  p.communicate()
+    #print Enp
+    #print output 
+    #print output
+    #Ep=float(output)
+    #p=sp.Popen("rm surface.povdat", shell=True)
+    #p.communicate()
+    return Enp #((Ep/4.184)+Enp) #Our UOM is kcal wile Libo's FSEA is in KJ
+
 def Eone(gro_files, top_file):
     sp.call(["cp",top_file,"gromacs.top"])
     E=[]
     for gro_f in gro_files:
-        sp.call(["cp",gro_f,"gromacs.gro"])
-	p=sp.Popen("/home/ebrini/software/SEA/bin/solvate -s gromacs -d 12 -i 500 2>/dev/null", shell=True, stdout=sp.PIPE)
-	(output, err) =  p.communicate()
-        for line in output.split('\n'):
-	  if "Total" in line:
-	     line=line.split()
-	     Etot=float(line[1])
-	     E.append(Etot)
+         E.append(energy_SEA(gro_f))
     return np.array(E)
 
 def Eall(gro_files, top_files):
@@ -170,42 +195,79 @@ def plot_res(dg, qrange, srange):
     ax1.tick_params(axis='y', which='major', labelsize=20)
     ax1.tick_params(axis='x', which='major', labelsize=20)
 
-    cb=mpl.colorbar.ColorbarBase(ax10, cmap='bwr', orientation='vertical', norm=mpl.colors.Normalize(vmin=-M, vmax=M), 
-                    ticks=[-M, -M/2, 0, M/2, M])
+    cb=mpl.colorbar.ColorbarBase(ax10, cmap='bwr', orientation='vertical', norm=mpl.colors.Normalize(vmin=-M, vmax=M),ticks=[-M, -M/2, 0, M/2, M])
     plt.savefig('Result.png')
 
 def parse_args():                              #in line argument parser with help 
     parser = argparse.ArgumentParser()
-    parser.add_argument('np', help='number of points (21)')
-    parser.add_argument('dgt', help='target solvation free energy')
+    parser.add_argument('-np', type=int, help='number of points (21)', default=21)
+    parser.add_argument('-dgt',type=float,  help='target solvation free energy')
+    parser.add_argument('-trj_n', type=str, help='gromacs trajectory to read')
+    parser.add_argument('-top_n', type=str, help='gromacs topology to read')
+    parser.add_argument('-tpr_n', type=str, help='gromacs tpr to read')
+    parser.add_argument('-q_r', type=float, help='range of charge that will be sampled (+-q)',default=0.1)
+    parser.add_argument('-s_r', type=float, help='range of sigma that will be sampled (+-s)', default=0.1)
+    parser.add_argument('-nbin',type=int, help='number of bins to calulate P(E), P(DE) distr', default=50)
+    parser.add_argument('-split', help='split the computation on 4 subsets', action="store_true")
+    parser.add_argument('-sect', type=int, help='subset to be calculated', default=5)
     return parser.parse_args()
 
+def prepare_args(args):                                               #This fuction handles the in line input 
+    npoints=args.np                                                   #
+    if npoints % 2 == 0:                                              #
+        print "!!The number of point must be odd!!"                    
+        exit()
+    dg_target=args.dgt                                                #These are not super needed 
+    top_n=args.top_n                                                  #
+    trj_n=args.trj_n                                                  #
+    tpr_n=args.tpr_n                                                  #
+    nbin=args.nbin                                                    #
+    sect=args.sect                                                    #
+    qrange=np.linspace(-(args.q_r),(args.q_r),num=npoints)            #
+    srange=np.linspace(-(args.s_r),(args.s_r),num=npoints)            #
+    zero=[int(np.floor(npoints/2)),int(np.floor(npoints/2))]          # To know which of the new TOP files has the original FF
+    if args.split:
+       if (sect > 4) or (sect < 1):
+          print "!!!I cant calcualte a sector that does not exists (there are only 4 sect: from 1 to 4)!!!"
+          exit()
+       elif sect==1:                                   # This is needed: we can split the calc in 4 sectors and this handle it 
+            srange=srange[0:int(np.ceil(npoints/2))+1] # The 4 sectors are arragned as follows:
+            qrange=qrange[0:int(np.ceil(npoints/2))+1] #                    sigma
+            zero=[len(srange)-1, len(qrange)-1]        #    |-10              0              +10|
+       elif sect==2:                                   #   -+-----------------+-----------------+
+            srange=srange[int(np.floor(npoints/2)):]   # -10|                 |                 |
+            qrange=qrange[0:int(np.ceil(npoints/2))+1] #    |     sect 1      |  sect2          |
+            zero=[0, len(qrange)-1]                    #    |  s=[-10:0]      | s=[ 0:10]       |
+       elif sect==3:                                   #    |  q=[-10:0]      | q=[-10:0]       |
+            srange=srange[0:int(np.ceil(npoints/2))+1] #q  0+-----------------+-----------------+
+            qrange=qrange[int(np.floor(npoints/2)):]   #    |                 |                 |
+            zero=[len(srange)-1, 0]                    #    |     sect 3      |  sect 4         |
+       elif sect==4:                                   #    |  s=[-10:0]      | s=[ 0:10]       |
+            srange=srange[int(np.floor(npoints/2)):]   # +10|  q=[ 0:10]      | q=[ 0:10]       |
+            qrange=qrange[int(np.floor(npoints/2)):]   #   -+-----------------+-----------------+
+            zero=[0,0]                                 # Yep, some points are calculated in 2 or more sector
+    zero=[zero[1],zero[0]] # The order is q scaling and scaling in the rest of the script
+    #print "q: ",qrange 
+    #print "s: ",srange
+    #print "zero:",zero,srange[zero[0]],qrange[zero[1]] 
+    return npoints, dg_target, qrange, srange, top_n, trj_n, tpr_n, nbin, zero
 
 
 def main():
     #"Hard-coded" variables: not much sense to change them at this point, but it is nice to have an handle for future 
-    qrange=[-0.1,0.1]      # We scan +-10% in Q 
-    srange=[-0.1,0.1]      #    and S
     new_top_name="TOP"     # Name of topology file 
     new_gro_name="struct"  # Name of conf file 
-    nbin=50                # Number of point to calc P distr
     kBT=300*1.9872041E-3   # KT in kcal/mol
 
     #Script:
-    args = parse_args()             #We read some input 
-    npoints=int(args.np)            #   and we process
-    dg_target=float(args.dgt)       #   them
-    if npoints % 2 ==0 : 
-       print "!!The number of point must be odd!!"
-       exit()
-    qrange=np.linspace(qrange[0],qrange[1],num=npoints)
-    srange=np.linspace(srange[0],srange[1],num=npoints)
-    Th, Tc, Tt, At, A=read_top("topol.top")         #Read and decompose the 
-    ATinfo, sigma, epsilon  = get_s_e(At)           #     topology
-    Ainfo, q=get_q(A)                               #     ...
-    gro_files=create_gro(new_gro_name, 'non-Water') #Create gro files
-    top_files=write_tops(Th, Tc, Tt, ATinfo, Ainfo, sigma, epsilon, q, srange, qrange, new_top_name, npoints) #Greate top 
-    E0=Eone(gro_files, top_files[int(len(top_files)/2)]) # E of each config for original FF 
+    args = parse_args()                                                                      #We read some input 
+    npoints, dg_target, qrange, srange, top_n, trj_n, tpr_n, nbin, zero = prepare_args(args) #And we prepare it  
+    Th, Tc, Tt, At, A=read_top(top_n)                                                        #Read and decompose the 
+    ATinfo, sigma, epsilon  = get_s_e(At)                                                    #    topology
+    Ainfo, q=get_q(A)                                                                        #    ...
+    gro_files=create_gro(new_gro_name, 'non-Water', trj_n, tpr_n)                            #Create gro files
+    top_files=write_tops(Th, Tc, Tt, ATinfo, Ainfo, sigma, epsilon, q, srange, qrange, new_top_name, npoints) #and top
+    E0=Eone(gro_files, top_num.format(new_top_name, zero[0], zero[1])) # E of each config for original FF 
     Ea=Eall(gro_files, top_files)                        # " "  "    "      "   all  
     dg0=DG0(E0,nbin)                                     # DG* original FF
     ddg_all= DDG(Ea,E0,kBT)                              # DG* all 

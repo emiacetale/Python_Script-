@@ -16,6 +16,10 @@ from collections import namedtuple
 import os 
 import subprocess as sp
 import numpy as np
+
+import matplotlib as mpl    #To create graph directly in the queue 
+mpl.use('Agg')              #"   "     "     "        "  "   " 
+
 import matplotlib.pyplot as plt
 
 from simtk.openmm.app import AmberPrmtopFile, OBC2, GBn, GBn2, Simulation, PDBFile, StateDataReporter
@@ -64,18 +68,19 @@ def frame_op(sim0, sim1, trj):
     for frame in trj:
         E0.append(Eframe(sim0,frame))
         E1.append(Eframe(sim1,frame))
-    #print E0
-    #print E1
     E0=np.array(E0)
     E1=np.array(E1)
     P=-(E1-E0)/kT
     P=np.exp(P)
     W=np.sum(P)
-    return P/W
+    pDE, pDE_bins = np.histogram((E1-E0),bins=30,density=True) #For quality control 
+    return P/W, [pDE, pDE_bins]
 
-def metatrj(trj, P, name_out):
+def metatrj(trj, P, name_out, psi, phi):
     i=0  
     frames_used=[]
+    Fpsi=open('psi.txt','w')
+    Fphi=open('phi.txt','w')
     with md.formats.PDBTrajectoryFile(name_out,mode='w') as out:
         while i<len(trj): #We need i since mdtraj cand perform a len() of a trj that is being created
             #print i
@@ -83,8 +88,12 @@ def metatrj(trj, P, name_out):
             if P[frame]>np.random.random():
                out.write(trj[frame].xyz[0, ...],trj.topology)
                frames_used.append(frame)
+               Fpsi.write((str(psi[frame]).replace('\n',' '))[1:-1]+" 0.0 \n")   #Similar to VMD out
+               Fphi.write("0.0 "+(str(phi[frame]).replace('\n',' '))[1:-1]+"\n") #Similar to VMD out
                i=i+1
-    out.close()     
+    out.close()
+    Fpsi.close()
+    Fphi.close()
     return frames_used
 
 def Eframe(sim,frame):
@@ -92,7 +101,7 @@ def Eframe(sim,frame):
     state = sim.context.getState(getEnergy=True)
     return ((state.getPotentialEnergy()/kilojoule_per_mole)*0.239005736)
 
-def make_info(frame_list,P):
+def make_info(frame_list,P,pDE):
     #Per Frame Probability 
     fig_PF=plt.figure()
     ax1 = fig_PF.add_axes([0.25, 0.15, 0.65, 0.8])
@@ -100,7 +109,7 @@ def make_info(frame_list,P):
     ax1.set_xlabel(r'$ frame $',fontsize=25)
     ax1.set_ylabel(r'$ P(frame) $',fontsize=25)
     p1,=ax1.plot(np.arange(0,len(P),1),P, color='blue', linewidth=2, linestyle="-")
-    fig_PF.savefig('Prob_per_frame.pdf')
+    fig_PF.savefig('Prob_per_frame.png')
     #Aboundancy of original traj frame in the meta-trj
     fig_FA=plt.figure()
     P_R, eR=np.histogram(frame_list,bins=len(P),normed=False)
@@ -109,7 +118,28 @@ def make_info(frame_list,P):
     ax1.set_xlabel('frame',fontsize=20)
     ax1.set_ylabel('N of times frame appear in meta traj',fontsize=20)
     p1,=ax1.plot(np.arange(0,len(P),1),P_R, color='blue', linewidth=2, linestyle="-")
-    fig_FA.savefig('Abound_F0_in_metatraj.pdf') 
+    fig_FA.savefig('Abound_F0_in_metatraj.png') 
+    print "Used: "+str(len(list(set(frame_list))))+" frames of the original "+str(len(frame_list))+" frames\n"
+    np.savetxt("Frame_prob",P) #Writes the frame probability to a file
+    #Difference in energy distributiuon (gives an idea of the error of TD perturbation)
+    fig_pDE=plt.figure()
+    ax1 = fig_pDE.add_axes([0.25, 0.15, 0.65, 0.8])
+    ax1.tick_params(axis='both', which='major', labelsize=20)
+    ax1.set_xlabel(r'$ \Delta E $',fontsize=25)
+    ax1.set_ylabel(r'$ P(\Delta E) $',fontsize=25)
+    p1,=ax1.plot(pDE[1][:-1],pDE[0], color='blue', linewidth=2, linestyle="-")
+    NP=pDE[0]*np.exp(-pDE[1][:-1]/kT)
+    W=np.sum(NP*(pDE[1][1]-pDE[1][0]))
+    p2,=ax1.plot(pDE[1][:-1],NP/W, color='red', linewidth=2, linestyle="-")
+    exp=ax1.plot(pDE[1][:-1],np.exp(-pDE[1][:-1]/kT), color='black', linewidth=1, linestyle="--")
+    ax1.legend((p1,p2),(r'$P_0(\Delta U)$',r'$P_0(    \Delta U) e^{-\beta \Delta U }$'),loc='upper left')
+    fig_pDE.savefig('DE_distr.png')
+
+
+def dihedral_calc(trj):
+    ind, phi=md.compute_phi(trj,periodic=False,opt=True)
+    ind, psi=md.compute_psi(trj,periodic=False,opt=True)
+    return (psi*180/np.pi), (phi*180/np.pi)
 
 def parse_args():                              #in line argument parser with help 
     parser = argparse.ArgumentParser()
@@ -125,14 +155,12 @@ def parse_args():                              #in line argument parser with hel
 def main():
     args = parse_args()                                                #Get inline input
     trj=md.load_pdb(args.trj_filename)                                 #load traj
-    print "trj loaded"
     sim0, sim1=omm_sys(args.amber_top, args.alph_scal,args.beta_scal)  #Pepare sims wih amap
-    P=frame_op(sim0, sim1, trj)                                        #Calc frames' norm P 
-    print "Prob calculated"
-    frame_list=metatrj(trj, P, 'meta_traj.pdb')                        #Create the traj from prob
-    print "Trj created"
-    make_info(frame_list,P)                                            #Create files useful for 
-
+    P, pDE=frame_op(sim0, sim1, trj)                                   #Calc frames' norm P 
+    psi, phi = dihedral_calc(trj)                                      #Calc phi and psi of every frame
+    frame_list=metatrj(trj, P, 'meta_traj.pdb', psi, phi)              #Create the traj from prob
+    make_info(frame_list,P,pDE)                                        #Create files useful for 
+    print "Done :) "
 
     ##print "E Stored"
     #W=weight(E,trj.topology.n_residues)
