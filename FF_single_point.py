@@ -85,7 +85,7 @@ def write_top(Th, Tc, Tt, ATinfo, Ainfo, s, e, q, ss, qs, filename):
          for line in Tt:
              print >>outfile, line[:-1]
          print >>outfile, "\n"
-    return [filename]
+    return filename
 
 def create_gro(name, group_out, trj_name, tpr_name):
     p=sp.Popen('trjconv -f '+trj_name+' -o '+name+'.gro -s '+tpr_name+' -sep -pbc mol 2>/dev/null', shell=True, stdin=sp.PIPE)
@@ -94,32 +94,20 @@ def create_gro(name, group_out, trj_name, tpr_name):
     p.stdin.close()
     p=sp.Popen('ls '+name+'*.gro',shell=True, stdout=sp.PIPE)
     (output, err) =  p.communicate()
-    return output.split() 
+    list=output.split() 
+    return [name+str(i)+'.gro' for i in np.arange(0,len(list),1,dtype=int)] #Orrible but effective way to create an ordered
+                                                                            #list of the filenames 
 
 def energy_SEA(filename_g):
-    sp.call(["cp",filename_g,"gromacs.gro"])
-    #p=sp.Popen("/home/ebrini/software/SEA_LIBO/bin/solvate -s gromacs -ce none -d 12 -i 500 2>/dev/null", shell=True, stdout=sp.PIPE)
-    #p.communicate()
+    sp.call(["mv",filename_g,"gromacs.gro"])
     p=sp.Popen("/home/ebrini/software/SEA/bin/solvate -s gromacs -ce none -d 12 -i 500", shell=True, stdout=sp.PIPE)
     (output, err) =  p.communicate()
     output=output.split('\n')
     for line in output:
-        #print line
-        #if 'Non-Polar' in line: 
         if 'Total' in line: 
-            #print line
             line=line.split()
             Enp=float(line[1])
-    #print Enp
-    #p=sp.Popen("/home/ebrini/software/FSEA/FSEA_adp_big_mol.exe < surface.povdat", shell=True, stdout=sp.PIPE)
-    #(output, err) =  p.communicate()
-    #print Enp
-    #print output 
-    #print output
-    #Ep=float(output)
-    #p=sp.Popen("rm surface.povdat", shell=True)
-    #p.communicate()
-    return Enp #((Ep/4.184)+Enp) #Our UOM is kcal wile Libo's FSEA is in KJ
+    return Enp 
 
 def Eone(gro_files, top_file):
     sp.call(["cp",top_file,"gromacs.top"])
@@ -128,20 +116,36 @@ def Eone(gro_files, top_file):
          E.append(energy_SEA(gro_f))
     return np.array(E)
 
-def Eall(gro_files, top_files):
-    E=[]
-    for top_file in top_files:
-        print top_file
-        e=Eone(gro_files, top_file)
-    	E.append(e)
-    return E 
+def EGromacs(traj, top, grompp, tpr):
+    p=sp.Popen('trjconv -f '+traj+' -o traj.trr -s '+tpr+' -sep -pbc mol 2>/dev/null', shell=True, stdin=sp.PIPE)
+    p.stdin.write('non-Water \n') #We should be sure to remove water from the traj
+    p.communicate()[0]            
+    p.stdin.close()
+    p=sp.Popen('grompp -f '+grompp+' -p '+top+' -c gromacs.gro', shell=True, stdin=sp.PIPE)
+    p.communicate()[0]
+    p.stdin.close()
+    p=sp.Popen('mdrun -rerun traj.trr -nt 1 2>/dev/null', shell=True, stdin=sp.PIPE)
+    p.communicate()[0]
+    p.stdin.close()
+    p=sp.Popen('g_energy -xvg none -o energy.xvg', shell=True, stdin=sp.PIPE)
+    p.stdin.write('Potential \n')
+    p.stdin.write('\n')
+    p.communicate()[0]
+    p.stdin.close()
+    X, E=np.loadtxt('energy.xvg', dtype=float, unpack=True)
+    p=sp.Popen('rm energy.xvg ener.edr md.log mdout.mdp topol.tpr traj.trr', shell=True, stdin=sp.PIPE)
+    p.communicate()[0]
+    p.stdin.close()
+    return E
 
+    
 def parse_args():                              #in line argument parser with help 
     parser = argparse.ArgumentParser()
     parser.add_argument('-trj_l', type=str, help='gromacs trajectory of the solute in solution to read')
     parser.add_argument('-trj_v', type=str, help='gromacs trajectory of the solute in vacuum to read')
     parser.add_argument('-top', type=str, help='gromacs topology to read')
-    parser.add_argument('-tpr', type=str, help='gromacs tpr to read')
+    parser.add_argument('-tpr_l', type=str, help='gromacs tpr to read')
+    parser.add_argument('-tpr_v', type=str, help='gromacs tpr to read')
     parser.add_argument('-qs', type=float, help='scaling of the charge with respect to the original FF')
     parser.add_argument('-ss', type=float, help='scaling of the sigma  with respect to the original FF')
     return parser.parse_args()
@@ -150,6 +154,7 @@ def main():
     #"Hard-coded" variables: not much sense to change them at this point, but it is nice to have an handle for future 
     new_top_name="TOP.top"     # Name of topology file 
     new_gro_name="struct"  # Name of conf file 
+    gompp_name="grompp.mdp"
     kBT=300*1.9872041E-3   # KT in kcal/mol
 
     #Script:
@@ -158,8 +163,11 @@ def main():
     ATinfo, sigma, epsilon  = get_s_e(At)                                                    #    topology
     Ainfo, q=get_q(A)                                                                        #    ...
     top_file=write_top(Th, Tc, Tt, ATinfo, Ainfo, sigma, epsilon, q, args.ss, args.qs, new_top_name)
-    gro_files=create_gro(new_gro_name, 'non-Water', args.trj_l, args.tpr) #Create gro files
-
+    #gro_files=create_gro(new_gro_name, 'non-Water', args.trj_l, args.tpr_l) #Create gro files
+    #E_SEA=Eone(gro_files, top_file)
+    E_LIQ=EGromacs(args.trj_l, top_file, gompp_name, args.tpr_l) 
+    print E_LIQ
+    
     #E0=Eone(gro_files, top_num.format(new_top_name, zero[0], zero[1])) # E of each config for original FF 
     #Ea=Eall(gro_files, top_files)                        # " "  "    "      "   all  
     #dg0=DG0(E0,nbin)                                     # DG* original FF
