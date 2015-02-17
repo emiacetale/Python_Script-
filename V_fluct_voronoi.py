@@ -56,10 +56,10 @@ def main():
     atom_index = find_protein_atoms(args.pdb)
     V=V_frames_in_trj(args.traj,args.pdb,atom_index)
     
-    print '<V>         = '+str(np.average(V))    
+    print '<V>         = '+str(np.average(V))+' nm'   
     st_dev=np.std(V, dtype=np.float64) 
-    print '<V^2>-<V>   = '+str(st_dev)
-    print '<V^2>-<V>^2 = '+str(st_dev*st_dev)
+    print '<V^2>-<V>   = '+str(st_dev)+' nm'
+    print '<V^2>-<V>^2 = '+str(st_dev*st_dev)+' nm^2'
     
     #V=[]
     #for frame in md.iterload('output.xtc', top='topology.pdb',chunk=1):
