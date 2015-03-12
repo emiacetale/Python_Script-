@@ -73,12 +73,12 @@ def write_top(Th, Tc, Tt, ATinfo, Ainfo, s, e, q, ss, qs, filename):
          for line in Th: 
              print >>outfile, line[:-1] 
          for at_i, sigma, epsilon in zip(ATinfo, s, e):
-             line=at_i+'{:12.9f}    {:12.9f} '.format((sigma+ss*sigma),epsilon)
+             line=at_i+'{:12.9f}    {:12.9f} '.format((ss*sigma),epsilon)
              print >>outfile, line
          for line in Tc:
              print >>outfile, line[:-1]
          for a_i, Q in zip(Ainfo, q):
-             line='{:8.5f}   {:8.5f}'.format((Q+qs*Q),a_i[1])
+             line='{:8.5f}   {:8.5f}'.format((qs*Q),a_i[1])
              line=a_i[0]+line
              print >>outfile, line
              #print >>outfile, "\n"
