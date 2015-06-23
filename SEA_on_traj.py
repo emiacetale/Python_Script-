@@ -26,18 +26,20 @@ def energy_SEA(filename_g,filename_top,quadrupole):
     sp.call(["cp",filename_g,"gromacs.gro"])
     sp.call(["cp",filename_top,"gromacs.top"])
     if quadrupole:   
-      line="/home/ebrini/software/SEA/bin/solvate -s gromacs -ce none -d 12 -i 500  -q 2> /dev/null "
+      line="/home/ebrini/software/SEA/bin/solvate -s gromacs -ce none -d 12 -i 500  -q #2> /dev/null"
     else:
-      line="/home/ebrini/software/SEA/bin/solvate -s gromacs -ce none -d 12 -i 500 2> /dev/null"
+      line="/home/ebrini/software/SEA/bin/solvate -s gromacs -ce none -d 12 -i 500 -q #2> /dev/null"
     p=sp.Popen(line, shell=True, stdout=sp.PIPE)
     (output, err) =  p.communicate()
     output=output.split('\n')
     for line in output:
         if 'Total' in line: 
             line=line.split()
-            E=float(line[1])
-    #print E 
-    return E 
+            Etot=float(line[1])
+        if 'Non-Polar' in line:
+            line=line.split()
+            Enp=float(line[1])
+    return Etot,Enp,Etot-Enp 
 
 def energy_fSEA(filename_g, filename_top):                    
     sp.call(["cp",filename_g,"gromacs.gro"])
@@ -56,7 +58,8 @@ def energy_fSEA(filename_g, filename_top):
     Ep=float(output)                           
     p=sp.Popen("rm surface.povdat", shell=True)
     p.communicate()                            
-    return Enp+(Ep/4.184) #Our UOM is kcal wile Libo's FSEA is in KJ
+    Ep=Ep/4.184 #Our UOM is kcal wile Libo's FSEA is in KJ
+    return Ep+Enp,Enp,Ep
 
 def clean_topology(top):
     name_new_top='top_clean.top'
@@ -99,6 +102,8 @@ def main():
        p=sp.Popen("cp /home/ebrini/software/FSEA/water_dist.csv /home/ebrini/software/FSEA/pos_formula.dat /home/ebrini/software/FSEA/neg_formula.dat .", shell=True, stdout=sp.PIPE)
 
     E=[]
+    Enp=[]
+    Ep=[]
     #print args.trj[-3:]
     #exit() 
 
@@ -113,25 +118,34 @@ def main():
       #print coord_file
       if args.fs or args.qs:  #we want to calulate quadrupole or field sea
           if args.fs:         #Field SEA
-                E.append(energy_fSEA(coord_file,cleaned_top))
+                tmp=energy_fSEA(coord_file,cleaned_top)
+                
                 #print "FSEA"
           else:               #Quadrupole SEA
-                E.append(energy_SEA(coord_file,cleaned_top,True))
+                tmp=energy_SEA(coord_file,cleaned_top,True)
                 #print "QSEA"
       else:                   #Dipole SEA
-                E.append(energy_SEA(coord_file,cleaned_top,False))
+                tmp=energy_SEA(coord_file,cleaned_top,False)
                 #print "DSEA"
+      E.append(tmp[0])
+      Enp.append(tmp[1])
+      Ep.append(tmp[2])
+
     E=np.array(E)
+    Enp=np.array(Enp)
+    Ep=np.array(Ep)
     
     if args.fs or args.qs:  #Make a BU file with the enerdy and an appropriate name
        if args.fs:         #Field SEA
-          with open('FSEA_E.pcl','wb') as fd: pic.dump((E),fd) 
+          with open('FSEA_E.pcl','wb') as fd: pic.dump((E,Enp,Ep),fd) 
        else:               #Quadrupole SEA
-          with open('QuadSEA.pcl','wb') as fd: pic.dump((E),fd) 
+          with open('QuadSEA.pcl','wb') as fd: pic.dump((E,Enp,Ep),fd) 
     else:                   #Dipole SEA
-          with open('DipSEA.pcl','wb') as fd: pic.dump((E),fd) 
+          with open('DipSEA.pcl','wb') as fd: pic.dump((E,Enp,Ep),fd) 
 
-    print 'DG* = '+str(np.average(E))+' kcal/mol'
+    print 'DG*   = '+str(np.average(E))+' kcal/mol'
+    print 'DGnp* = '+str(np.average(Enp))+' kcal/mol'
+    print 'DGp*  = '+str(np.average(Ep))+' kcal/mol'
 
     if args.trj[-3:]!='gro':
         clean_folder(gro_files)
