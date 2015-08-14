@@ -41,7 +41,7 @@ def energy_SEA(filename_g,filename_top,quadrupole):
             Enp=float(line[1])
     return Etot,Enp,Etot-Enp 
 
-def energy_fSEA(filename_g, filename_top):                    
+def energy_fSEA(filename_g, filename_top, nrep):                    
     sp.call(["cp",filename_g,"gromacs.gro"])
     sp.call(["cp",filename_top,"gromacs.top"])
     p=sp.Popen("/home/ebrini/software/SEA_LIBO/bin/solvate -s gromacs -ce none 2>/dev/null", shell=True, stdout=sp.PIPE)
@@ -51,14 +51,16 @@ def energy_fSEA(filename_g, filename_top):
         if 'Non-Polar' in line: 
             line=line.split()
             Enp=float(line[1])
-
-    p=sp.Popen("/home/ebrini/software/FSEA/FSEA_adp_big_mol.exe < surface.povdat", shell=True, stdout=sp.PIPE)
-    (output, err) =  p.communicate()           
-    #print output                              
-    Ep=float(output)                           
+    
+    tmp=[]
+    for i in range(nrep):  #We need to iterate to get a stable results
+       p=sp.Popen("/home/ebrini/software/FSEA-optimized/FSEA_adp_big_mol.exe < surface.povdat", shell=True, stdout=sp.PIPE)
+       (output, err) =  p.communicate()           
+       #print output                              
+       tmp.append(float(output))
     p=sp.Popen("rm surface.povdat", shell=True)
-    p.communicate()                            
-    Ep=Ep/4.184 #Our UOM is kcal wile Libo's FSEA is in KJ
+    p.communicate() 
+    Ep=np.average(np.array(tmp))/4.184 #We average over the calulations and convert udm to kcal/mol
     return Ep+Enp,Enp,Ep
 
 def clean_topology(top):
@@ -79,7 +81,7 @@ def clean_folder(file_list):
 def parse_args():                              #in line argument parser with help 
     parser = argparse.ArgumentParser()
     parser.add_argument('-trj', type=str, help='gromacs trajectory of the solute in solution to read')
-    parser.add_argument('-top', type=str, help='gromacs topology to read (without water!)')
+    parser.add_argument('-top', type=str, help='gromacs topology to read')
     parser.add_argument('-tpr', type=str, help='gromacs tpr to read for solution sim')
     parser.add_argument('-fs', help='perform a field-sea calc instead of dipolar-SEA',
                               action='store_true', default=False)
@@ -118,7 +120,7 @@ def main():
       #print coord_file
       if args.fs or args.qs:  #we want to calulate quadrupole or field sea
           if args.fs:         #Field SEA
-                tmp=energy_fSEA(coord_file,cleaned_top)
+                tmp=energy_fSEA(coord_file,cleaned_top,50)
                 
                 #print "FSEA"
           else:               #Quadrupole SEA
