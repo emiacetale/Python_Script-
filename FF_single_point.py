@@ -9,6 +9,7 @@ mpl.use('Agg')              #"   "     "     "        "  "   "
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import time 
+import SEA
 
 top_num ='{}_{:02d}_{:02d}.top'
 
@@ -87,51 +88,18 @@ def write_top(Th, Tc, Tt, ATinfo, Ainfo, s, e, q, ss, qs, filename):
          print >>outfile, "\n"
     return filename
 
-def ESEA(traj, top, tpr, new_gro_name):
-    gro_files=create_gro(new_gro_name, 'non-Water', traj, tpr) #Create gro files
-    E=Eone(gro_files, top)
-    return (E*4.184) 
-
-def create_gro(name, group_out, trj_name, tpr_name):
-    p=sp.Popen('trjconv -f '+trj_name+' -o '+name+'.gro -s '+tpr_name+' -sep -pbc mol 2>/dev/null', shell=True, stdin=sp.PIPE)
-    p.stdin.write(group_out+' \n')
-    p.communicate()[0]
-    p.stdin.close()
-    p=sp.Popen('ls '+name+'*.gro',shell=True, stdout=sp.PIPE)
-    (output, err) =  p.communicate()
-    list=output.split() 
-    return [name+str(i)+'.gro' for i in np.arange(0,len(list),1,dtype=int)] #Orrible but effective way to create an ordered
-
-def energy_SEA(filename_g):
-    sp.call(["mv",filename_g,"gromacs.gro"])
-    p=sp.Popen("/home/ebrini/software/SEA/bin/solvate -s gromacs -ce none -d 12 -i 500 2> /dev/null ", shell=True, stdout=sp.PIPE)
-    (output, err) =  p.communicate()
-    output=output.split('\n')
-    for line in output:
-        if 'Total' in line: 
-            line=line.split()
-            E=float(line[1])
-    return E 
-
-def Eone(gro_files, top_file):
-    sp.call(["cp",top_file,"gromacs.top"])
-    E=[]
-    for gro_f in gro_files:
-         E.append(energy_SEA(gro_f))
-    return np.array(E)
-
 def EGromacs(traj, top, grompp, tpr,group):
-    p=sp.Popen('trjconv -f '+traj+' -o traj0.trr -s '+tpr+' -pbc mol &> /dev/null ', shell=True, stdin=sp.PIPE)
+    p=sp.Popen('trjconv -f '+traj+' -o traj0.trr -s '+tpr+' -pbc mol ', shell=True, stdin=sp.PIPE)
     p.stdin.write(group+' \n') #We should be sure to remove water from the traj
     p.communicate()[0]            
     p.stdin.close()
-    p=sp.Popen('grompp -f '+grompp+' -p '+top+' -c gromacs.gro &> /dev/null ', shell=True, stdin=sp.PIPE)
+    p=sp.Popen('grompp -f '+grompp+' -p '+top+' -c gromacs.gro  ', shell=True, stdin=sp.PIPE)
     p.communicate()[0]
     p.stdin.close()
-    p=sp.Popen('mdrun -rerun traj0.trr -nt 1 &> /dev/null ', shell=True, stdin=sp.PIPE)
+    p=sp.Popen('mdrun -rerun traj0.trr -nt 1 ', shell=True, stdin=sp.PIPE)
     p.communicate()[0]
     p.stdin.close()
-    p=sp.Popen('g_energy -xvg none -o energy.xvg &> /dev/null ', shell=True, stdin=sp.PIPE)
+    p=sp.Popen('g_energy -xvg none -o energy.xvg  ', shell=True, stdin=sp.PIPE)
     p.stdin.write('Potential \n')
     p.stdin.write('\n')
     p.communicate()[0]
@@ -141,7 +109,15 @@ def EGromacs(traj, top, grompp, tpr,group):
     p.communicate()[0]
     p.stdin.close()
     return E
-    
+
+def ESEA(trj, top_file, tpr, new_gro_name):
+    gro_files=SEA.create_gro(new_gro_name, 'non-Water', trj, tpr)
+    Etot=[]
+    for f in gro_files:
+        Et, Enp, Ep = SEA.energy_SEA(f,top_file,fieldsea=True)
+        Etot.append(Et)
+    return Etot
+
 def parse_args():                              #in line argument parser with help 
     parser = argparse.ArgumentParser()
     parser.add_argument('-trj_l', type=str, help='gromacs trajectory of the solute in solution to read')

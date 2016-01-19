@@ -9,6 +9,7 @@
 #import mdtraj as md
 import subprocess as sp
 import os 
+import numpy as np
 
 def create_gro(name, group_out, trj_name, tpr_name):
     p=sp.Popen('trjconv -f '+trj_name+' -o '+name+'.gro -s '+tpr_name+' -sep -pbc mol &>/dev/null', shell=True, stdin=sp.PIPE)
