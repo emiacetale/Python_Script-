@@ -70,7 +70,7 @@ def print_out(eed,rg,phi,psi):
     P_rg, e_rg=p_norm_2D(rg)
     print_value_raw(np.transpose(np.append([e_rg],[P_rg],axis=0)),'P_Rg','{:8.6f}')
     print_value_raw(phi,'phi','{:8.6f}')
-    print_value_raw(phi,'psi','{:8.6f}')
+    print_value_raw(psi,'psi','{:8.6f}')
 
 def main():
     args = parse_args()
