@@ -1,5 +1,6 @@
 #!/usr/bin/env python  
 
+import numpy as np
 import copy as copy
 import argparse
 import mdtraj as md 
@@ -18,35 +19,28 @@ def get_trjs(trj_files,top='XXX'):
         ai=tmp.top.select("backbone")
         tmp.atom_slice(ai,inplace=True)
         trajs.append(copy.deepcopy(tmp))
+        print "TRJ "+el+" loaded"
     return trajs
 
 def get_RMSDs(trajs,refs):
     RMSDs=[]
     for traj in trajs:
+        print "new traj"
         RMSD=[]
         for ref in refs:
-            print ref.top.select("chainid 0"), traj.top.select("chainid 0")
-            #We allign the 1st chain                                             
-            #traj.superpose(ref,frame=0,atom_indices=traj.top.select("chainid 0"),ref_atom_indices=ref.top.select("chainid 0"))
-            traj.superpose(ref,frame=0,atom_indices=ref.top.select("chainid 0"),ref_atom_indices=ref.top.select("chainid 0"))
-            #And we compute the RMSD of the 2nd chain
-            #rmsd=md.rmsd(traj,ref,frame=0,atom_indices=traj.top.select("chainid 1"), 
-            #              ref_atom_indices=ref.top.select("chainid 1"),precentered=True)
-            #rmsd=md.rmsd(traj,ref,frame=0,atom_indices=ref.top.select("chainid 1"),
-            #              ref_atom_indices=ref.top.select("chainid 1"),precentered=True)
-            rmsd=calc_RMDS(trj.atom_slice(traj.top.select("chainid 1")),ref.atom_slice(traj.top.select("chainid 1")))
+            print "new ref"
+            traj=traj.superpose(ref,frame=0,atom_indices=ref.top.select("chainid 0"),ref_atom_indices=ref.top.select("chainid 0"))
+            rmsd=calc_RMDS(traj.atom_slice(ref.top.select("chainid 1")),ref.atom_slice(ref.top.select("chainid 1")))
             RMSD.append(rmsd)
         RMSDs.append(RMSD)
     return RMSDs
 
 def calc_RMDS(trj,ref):
-    RMSDs=[]
+    #RMSDs=[]
     coord_trj=trj.xyz
-    coord_ref=tef.xyz[0]
-    for coord in coord_trj:
-        dist=np.square(coord-coord_trj)
-        rmsd=np.sqrt((np.sum(dist))/len(dist))
-        RMSDs.append(rmsd)
+    coord_ref=ref.xyz[0]
+    dist=np.square(coord_trj-coord_ref)
+    RMSDs=[np.sqrt((np.sum(d))/len(d)) for d in dist]
     return RMSDs
 
 def parse_args():                              #in line argument parser with help 
@@ -54,7 +48,7 @@ def parse_args():                              #in line argument parser with hel
     parser.add_argument('-top',help='topology files')
     parser.add_argument('-trajs', help='files to read', nargs='+')
     parser.add_argument('-refpdbs', help='value to consider',nargs='+')
-    parser.add_argument('-out', help='output pickl file name',default='RMSD_bu.pckl',nargs=1)
+    parser.add_argument('-out', help='output pickl file name',default='RMSD_bu.pckl', type=str)
     #parser.add_argument('-gn', help='number identifier of the group to highlight', default='428')
     return parser.parse_args()
 
@@ -63,11 +57,8 @@ def main():
     trajs = get_trjs(args.trajs,args.top) 
     refs  = get_trjs(args.refpdbs)
     RMSDs = get_RMSDs(trajs,refs)
-    with open(args.out[0],'w') as BUF:
+    with open(args.out,'w') as BUF:
          pickle.dump(RMSDs,BUF)
-
-
-
 
 if __name__ == '__main__': #Weird Python way to execute main()
     main()
