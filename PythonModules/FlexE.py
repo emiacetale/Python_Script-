@@ -1,8 +1,5 @@
 import numpy as np
 import mdtraj as md 
-from tqdm import tqdm as tqdm
-#from joblib import Parallel, delayed
-#from sklearn.utils import Parallel, delayed
 from copy import deepcopy as dc
 
 #Function to compute FlexE over all the frames in a trajectory given a reference structure
