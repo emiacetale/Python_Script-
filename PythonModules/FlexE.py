@@ -1,7 +1,8 @@
 import numpy as np
 import mdtraj as md 
 from tqdm import tqdm as tqdm
-from joblib import Parallel, delayed
+#from joblib import Parallel, delayed
+#from sklearn.utils import Parallel, delayed
 from copy import deepcopy as dc
 
 #Function to compute FlexE over all the frames in a trajectory given a reference structure
@@ -16,6 +17,10 @@ from copy import deepcopy as dc
 # r_nb_max = only residues closer than r_nb_max [A] will be considered 
 # pairs_to_exclude = interaction to exclude as pair of atoms [[i,j],[k,l],...] !! NB: i < j and k < l !!
 #
+#My sggestion, when the 2D FlexE is needed, is to execute it as:
+#from joblib import Parallel, delayed
+#RMSD2d=np.array(Parallel(n_jobs=nj)(delayed(FlexE_1D)(traj, ref, <parms>) for ref in traj))
+#
 
 #Computes the FlexE for all frames of a trajectory vs a reference
 def FlexE_1D(traj,ref,k_b=60,k_nb=6,scaling_factor=0.4,ij_bond=3,r_nb_max=12,pairs_to_exclude=[]):
@@ -27,19 +32,6 @@ def FlexE_1D(traj,ref,k_b=60,k_nb=6,scaling_factor=0.4,ij_bond=3,r_nb_max=12,pai
     del traj
     del ref
     return(np.array(E))
-
-#This function is here for convenience to compute the 2D FlexE (all frames vs each others) in parallel
-def FlexE_2D(traj,k_b=60,k_nb=6,scaling_factor=0.4,ij_bond=3,r_nb_max=12.0,pairs_to_exclude=[],nj=8):
-    frame_inexes=np.arange(0,len(traj))
-    RMSD2D=Parallel(n_jobs=nj)(delayed(FlexE_1D)(traj,
-                                                 traj[i],
-                                                 k_b=k_b,
-                                                 k_nb=k_nb,
-                                                 scaling_factor=scaling_factor,
-                                                 ij_bond=ij_bond,
-                                                 r_nb_max=r_nb_max,
-                                                 pairs_to_exclude=pairs_to_exclude) for i in tqdm(frame_inexes))
-    return(np.array(RMSD2D))
 
 ######################################################
 # Below are functions called by FlexE_1D             #
