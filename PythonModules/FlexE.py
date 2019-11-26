@@ -14,48 +14,43 @@ from copy import deepcopy as dc
 # r_nb_max = only residues closer than r_nb_max [A] will be considered 
 # pairs_to_exclude = interaction to exclude as pair of atoms [[i,j],[k,l],...] !! NB: i < j and k < l !!
 #
+#
+#
+#
+#####################################################################
 #My sggestion, when the 2D FlexE is needed, is to execute it as:
 #from joblib import Parallel, delayed
 #RMSD2d=np.array(Parallel(n_jobs=nj)(delayed(FlexE_1D)(traj, ref, <parms>) for ref in traj))
-#
+####################################################################
 
-#Computes the FlexE for all frames of a trajectory vs a reference
 def FlexE_1D(traj,ref,k_b=60,k_nb=6,scaling_factor=0.4,ij_bond=3,r_nb_max=12,pairs_to_exclude=[]):
-    traj=dc(traj)
-    ref=dc(ref)
-    EB=E_bond(traj,ref,k_b,scaling_factor,ij_bond,pairs_to_exclude)
-    ENB=E_nonbond(traj,ref,k_nb,scaling_factor,ij_bond,r_nb_max,pairs_to_exclude)
-    E=(EB+ENB)/ref.top.n_residues
-    del traj
-    del ref
+    #print("new FE")
+    pair_bond,k_bond=bond(traj,ref,k_b,scaling_factor,ij_bond,pairs_to_exclude)
+    pair_nonbond,k_nonbond=nonbond(traj,ref,k_nb,scaling_factor,ij_bond,r_nb_max,pairs_to_exclude)
+    pairs=np.concatenate((pair_bond,pair_nonbond),axis=0)
+    springs=np.concatenate((k_bond,k_nonbond),axis=0)
+    E=get_E(traj,ref,pairs,springs)/ref.top.n_residues
     return(np.array(E))
 
 ######################################################
 # Below are functions called by FlexE_1D             #
 ######################################################
 
-
-#FlexE contribution for residues closer than 3 bonds
-def E_bond(traj,r,k_b,scaling_factor,ij_bond,pairs_to_exclude):
+#Get pairs and spring constants for residues closer than 3 bonds
+def bond(traj,r,k_b,scaling_factor,ij_bond,pairs_to_exclude):
     pairs=get_pair_bonded(r.top.n_residues,ij_bond)
     if len(pairs_to_exclude)>0:
         pairs=exclude_pairs(pairs,pairs_to_exclude)
     springs=[scaling_factor*(k_b/((p[1]-p[0])*(p[1]-p[0]))) for p in pairs]
-    E=get_E(traj,r,pairs,springs)
-    del pairs
-    del springs
-    return(E)
+    return(np.array(pairs),springs)
 
-#FlexE contribution for residues further than 3 bonds
-def E_nonbond(traj,r,k_nb,scaling_factor,ij_bond,r_nb_max,pairs_to_exclude):
+#Get pairs and spring constants for residues further than 3 bonds
+def nonbond(traj,r,k_nb,scaling_factor,ij_bond,r_nb_max,pairs_to_exclude):
     pairs=get_pair_nb(r,ij_bond,r_nb_max)
     if len(pairs_to_exclude)>0:
         pairs=exclude_pairs(pairs,pairs_to_exclude)
     springs=get_springs_nb(r,pairs,k_nb)*scaling_factor
-    E=get_E(traj,r,pairs,springs)
-    del pairs
-    del springs
-    return(E)
+    return(np.array(pairs),springs)
 
 #This energy function computes k_springs*(dist^2). It is the same for bonded and non bonded 
 def get_E(traj,r,pairs,springs):
@@ -86,7 +81,7 @@ def get_pair_nb(r,ij_bond,r_nb_max):
     del dist
     return(pairs)
 
-#Sometimes we want to exclude residue pairs from the FlexE calculation (e.g. bonded interactions between monomers, ...
+#Sometimes we want to exclude residue pairs from the FlexE calculation (e.g. bonded interactions between monoms,...
 # ... or bonds in drugs). This is a flexible approach (but not super fast if the list is long)
 def exclude_pairs(pairs,pairs_to_exclude):
     P=np.array(pairs)
@@ -110,5 +105,3 @@ def get_springs_nb(r,pairs,k_nb):
 #mdtraj gives distances in nm, we have this function just to get them in A 
 def get_dist_A(t,p,opt=True,per=False):
     return(md.compute_distances(traj=t,atom_pairs=p,opt=opt,periodic=per)*10.0)
-
-
