@@ -3,7 +3,8 @@
 import argparse
 import mdtraj as md
 import numpy as np
-import cPickle as pickl
+#import cPickle as pickl
+import pickle as pickl
 from joblib import Parallel, delayed
 import copy as copy 
 
@@ -18,7 +19,7 @@ def wrap_RMSD(T, frames, P_index, L_index):
     RMSDs=[]
     t=copy.deepcopy(T) # we need to deep-copy the traj to edit it in parallel
     for i in frames:
-        print i 
+        print(i) 
         r=t[i]
         t=t.superpose(r, frame=0, atom_indices=P_index, 
                    ref_atom_indices=P_index, parallel=False)
@@ -32,9 +33,9 @@ def load_trj(trj_path,stride,start,top):
         t=md.load(trj_path,top=top)
     #print(t)
     if t.n_frames < start:
-        print '!!!ERROR!!! There are NOT enough frames in the traj' 
-        print 'There are only {:} frames in this trajectory'.format(t.n_frames)
-        print '!!ABORTING!!!'
+        print ('!!!ERROR!!! There are NOT enough frames in the traj')
+        print ('There are only {:} frames in this trajectory'.format(t.n_frames))
+        print ('!!ABORTING!!!')
         exit()
     return t.atom_slice(t.top.select('name CA'))[start::stride]
 
@@ -56,11 +57,11 @@ def parse_args():                              #in line argument parser with hel
 
 def main():
     args = parse_args()
-    if args.n_trajs>args.n_cores:
-        print '!!!ERROR!!!  Not enough cores to read all the trajs'
-        print '{:} cores < {:} trajs'.format(args.n_cores,args.n_trajs)
-        print '!!ABORTING!!!'
-        exit()
+    #if args.n_trajs>args.n_cores:
+    #    print ('!!!ERROR!!!  Not enough cores to read all the trajs')
+    #    print ('{:} cores < {:} trajs'.format(args.n_cores,args.n_trajs))
+    #    print ('!!ABORTING!!!')
+    #    exit()
     trajs=Parallel(n_jobs=args.n_trajs)(delayed(load_trj)('{:}.{:02d}.{:}'.format(args.trjs_name,i,args.trjs_ext),args.trj_stride,args.trj_eq_steps,args.top_file) for i in range(0,args.n_trajs))
     trajs=md.join(trajs)
 
@@ -81,6 +82,9 @@ def main():
     else:
         ai_1=np.array(args.p2_ai)
 
+    print(ai_0)
+    print(ai_1)
+
 
     #We compute the RMSD for the entire trajectory using our reference frames in parallel  
     RMSDs=Parallel(n_jobs=args.n_cores)(delayed(wrap_RMSD)(trajs,frames[i],ai_0,ai_1) for i in np.arange(0,args.n_cores))
@@ -89,7 +93,7 @@ def main():
     with open('2DRMSD_{:02d}.pickl'.format(i_proc),'wb') as fout:
         pickl.dump(RMSDs,fout)
     
-    print "Done"
+    print("Done")
 
     
 
